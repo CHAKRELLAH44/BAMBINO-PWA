@@ -1,32 +1,29 @@
-# React + TypeScript + Vite
+# Bambino — PWA de suivi bébé
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Application web progressive (React, TypeScript, Firebase) pour le suivi quotidien du bébé.
+Cahier des charges et conventions : [docs/](docs/).
 
-Currently, two official plugins are available:
+## Prérequis
+- Node.js 22 ou plus
+- Firebase CLI : `npm install -g firebase-tools`
+- Java 21 ou plus (pour les émulateurs Firebase)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Installation
+1. `npm install`
+2. Copier `.env.example` en `.env.local` et remplir les valeurs (console Firebase et EmailJS).
+3. `firebase login`
 
-## React Compiler
+## Lancer en local
+- Terminal 1 : `npm run emulators`
+- Terminal 2 : `npm run dev` puis ouvrir http://localhost:5173
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Avec `VITE_USE_EMULATORS=true`, l'application utilise les émulateurs (données effacées à l'arrêt).
 
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
-```
-
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Commandes
+| Commande | Rôle |
+|---|---|
+| `npm run dev` | serveur de développement |
+| `npm run build` | build de production dans `dist/` |
+| `npm run lint` | vérification du code |
+| `npm run emulators` | émulateurs Auth et Firestore |
+| `firebase deploy --only firestore:rules` | publier les règles de sécurité |
