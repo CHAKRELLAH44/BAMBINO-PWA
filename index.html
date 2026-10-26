@@ -2,9 +2,29 @@
 <html lang="fr" dir="ltr">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Bambino</title>
+    <meta name="description" content="Suivi de bébé et de la maman : biberons, tétées, sommeil, couches, stock de lait, journal." />
+    <meta name="theme-color" content="#fff1f2" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Bambino" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <script>
+      // Thème avant le premier affichage (évite un flash blanc) ; même logique que src/utils/theme.ts
+      try {
+        var preference = localStorage.getItem('bambino.theme') || 'system'
+        var dark = preference === 'dark' || (preference === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.classList.toggle('dark', dark)
+        if (dark) document.querySelector('meta[name="theme-color"]').setAttribute('content', '#1d1418')
+        // Langue et sens d'écriture (arabe = de droite à gauche) ; même clé que src/i18n/languagePreference.ts
+        if (localStorage.getItem('bambino.language') === 'ar') {
+          document.documentElement.lang = 'ar-MA'
+          document.documentElement.dir = 'rtl'
+        }
+      } catch (error) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

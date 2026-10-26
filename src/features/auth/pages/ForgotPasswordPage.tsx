@@ -5,6 +5,8 @@ import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { AuthCard } from '../../../components/AuthCard'
 import { FormField } from '../../../components/FormField'
+import { Notice } from '../../../components/Notice'
+import { IconMailCheck } from '@tabler/icons-react'
 import { authErrorKey } from '../authErrors'
 import { resetPassword } from '../authService'
 import { forgotPasswordSchema, type ForgotPasswordValues } from '../schemas'
@@ -32,9 +34,11 @@ export function ForgotPasswordPage() {
   return (
     <AuthCard title={t('auth.forgotPassword.title')}>
       {sent ? (
-        <div role="status" className="flex flex-col gap-2 text-center">
-          <p className="text-slate-700">{t('auth.forgotPassword.sent')}</p>
-          <p className="text-xs text-slate-500">{t('auth.forgotPassword.checkSpam')}</p>
+        <div role="status">
+          <Notice icon={IconMailCheck}>
+            <p className="font-medium">{t('auth.forgotPassword.sent')}</p>
+            <p className="mt-1">{t('auth.checkSpam')}</p>
+          </Notice>
         </div>
       ) : (
         <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex flex-col gap-4">

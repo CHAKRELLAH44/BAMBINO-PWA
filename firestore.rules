@@ -7,6 +7,17 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid == userId;
     }
 
+    // Horodatages posés par serverTimestamp() : createdAt à la création, updatedAt à chaque écriture
+    function hasCreateTimestamps() {
+      return request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+    }
+
+    function hasUpdateTimestamps() {
+      return request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time;
+    }
+
     function isValidUser(data) {
       return data.keys().hasOnly(['displayName', 'email', 'preferredLanguage', 'timezone',
                                   'welcomeEmailSent', 'onboardingCompleted', 'createdAt', 'updatedAt'])
@@ -19,20 +30,418 @@ service cloud.firestore {
         && data.createdAt is timestamp;
     }
 
+    // Profil bébé (cahier §4, §27)
+    function isValidBaby(data) {
+      return data.keys().hasOnly(['name', 'birthDate', 'sex', 'avatarEmoji', 'themeColor',
+                                  'archivedAt', 'photo', 'createdAt', 'updatedAt'])
+        && data.keys().hasAll(['name', 'birthDate', 'sex', 'avatarEmoji', 'themeColor',
+                               'archivedAt', 'createdAt', 'updatedAt'])
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 50
+        && data.birthDate is timestamp && data.birthDate <= request.time
+        && (data.sex == null || data.sex in ['female', 'male'])
+        && data.avatarEmoji is string && data.avatarEmoji.size() > 0 && data.avatarEmoji.size() <= 16
+        && (data.themeColor == null
+            || data.themeColor in ['rose', 'sky', 'amber', 'emerald', 'violet', 'slate'])
+        && (data.archivedAt == null || data.archivedAt is timestamp)
+        // Photo facultative (décision du 22/10) : JPEG réduit sur le téléphone, jamais Firebase Storage (§33)
+        && (data.get('photo', null) == null
+            || (data.photo is string && data.photo.size() <= 150000
+                && data.photo.matches('data:image/jpeg;base64,[A-Za-z0-9+/=]+')));
+    }
+
+    function babyExists(userId, babyId) {
+      return exists(/databases/$(database)/documents/users/$(userId)/babies/$(babyId));
+    }
+
+    function isOptionalAmount(value, max) {
+      return value == null || (value is number && value >= 0 && value <= max);
+    }
+
+    // Événement ponctuel : pas de début, fin ni statut
+    function isPointEvent(data) {
+      return !data.keys().hasAny(['startAt', 'endAt', 'status']);
+    }
+
+    // Biberon (§6, décision d'équipe du 22/10) : seulement la quantité bue, jamais négative.
+    // « Lait maternel (stock) » = lait maternel + contenant du stock, avec une quantité bue retirée du stock.
+    function isValidBottleDetails(details) {
+      return details is map
+        && details.keys().hasOnly(['consumedMl', 'milkType', 'containerId'])
+        && details.keys().hasAll(['consumedMl', 'milkType'])
+        && details.consumedMl is number && details.consumedMl >= 0 && details.consumedMl <= 1000
+        && details.milkType in ['formula', 'breastMilk']
+        && (details.get('containerId', null) == null
+            || (details.containerId is string && details.milkType == 'breastMilk' && details.consumedMl > 0));
+    }
+
+    // Couche (cahier §10)
+    function isValidDiaperDetails(details) {
+      return details is map
+        && details.keys().hasOnly(['kind']) && details.keys().hasAll(['kind'])
+        && details.kind in ['wet', 'dirty', 'both'];
+    }
+
+    // Tirage (cahier §8.1)
+    function isValidPumpingDetails(details) {
+      return details is map
+        && details.keys().hasOnly(['side', 'totalMl', 'leftMl', 'rightMl', 'durationMin'])
+        && details.keys().hasAll(['side', 'totalMl', 'leftMl', 'rightMl', 'durationMin'])
+        && details.side in ['left', 'right', 'both']
+        && details.totalMl is number && details.totalMl > 0 && details.totalMl <= 2000
+        && isOptionalAmount(details.leftMl, 1000)
+        && isOptionalAmount(details.rightMl, 1000)
+        && isOptionalAmount(details.durationMin, 300);
+    }
+
+    function isValidSegment(segment) {
+      return segment is map
+        && segment.keys().hasOnly(['side', 'startAt', 'endAt'])
+        && segment.keys().hasAll(['side', 'startAt', 'endAt'])
+        && segment.side in ['left', 'right']
+        && segment.startAt is timestamp
+        && (segment.endAt == null || segment.endAt is timestamp);
+    }
+
+    // Allaitement (cahier §7). Les règles ne savent pas parcourir une liste :
+    // on vérifie le premier et le dernier segment ; le reste est validé par Zod et la logique de séance.
+    function isValidBreastfeeding(data) {
+      return data.startAt is timestamp && data.occurredAt == data.startAt
+        && data.status in ['running', 'paused', 'done']
+        && ((data.status == 'done' && data.endAt is timestamp && data.endAt >= data.startAt)
+            || (data.status != 'done' && data.endAt == null))
+        && data.details is map
+        && data.details.keys().hasOnly(['segments', 'estimatedLeftMl', 'estimatedRightMl'])
+        && data.details.keys().hasAll(['segments', 'estimatedLeftMl', 'estimatedRightMl'])
+        && data.details.segments is list
+        && data.details.segments.size() >= 1 && data.details.segments.size() <= 100
+        && isValidSegment(data.details.segments[0])
+        && isValidSegment(data.details.segments[data.details.segments.size() - 1])
+        && data.details.segments[0].startAt == data.startAt
+        // Seule une séance en cours a un segment ouvert, et c'est le dernier
+        && ((data.status == 'running')
+            == (data.details.segments[data.details.segments.size() - 1].endAt == null))
+        && isOptionalAmount(data.details.estimatedLeftMl, 500)
+        && isOptionalAmount(data.details.estimatedRightMl, 500);
+    }
+
+    function isValidPumpingSegment(segment) {
+      return segment is map
+        && segment.keys().hasOnly(['startAt', 'endAt'])
+        && segment.keys().hasAll(['startAt', 'endAt'])
+        && segment.startAt is timestamp
+        && (segment.endAt == null || (segment.endAt is timestamp && segment.endAt >= segment.startAt));
+    }
+
+    // Chronomètre de tirage (§5, §8.1) : comme la tétée, premier et dernier segment vérifiés ;
+    // seul un tirage en cours a un segment ouvert, et c'est le dernier.
+    function isValidPumpingSession(data) {
+      return data.keys().hasOnly(['side', 'status', 'startAt', 'segments', 'createdAt', 'updatedAt'])
+        && data.keys().hasAll(['side', 'status', 'startAt', 'segments', 'createdAt', 'updatedAt'])
+        && data.side in ['left', 'right', 'both']
+        && data.status in ['running', 'paused']
+        && data.startAt is timestamp
+        && data.segments is list
+        && data.segments.size() >= 1 && data.segments.size() <= 100
+        && isValidPumpingSegment(data.segments[0])
+        && isValidPumpingSegment(data.segments[data.segments.size() - 1])
+        && data.segments[0].startAt == data.startAt
+        && ((data.status == 'running') == (data.segments[data.segments.size() - 1].endAt == null));
+    }
+
+    // Sommeil (cahier §9) : une période en cours n'a pas de fin
+    function isValidSleep(data) {
+      return data.startAt is timestamp && data.occurredAt == data.startAt
+        && ((data.status == 'running' && data.endAt == null)
+            || (data.status == 'done' && data.endAt is timestamp && data.endAt > data.startAt))
+        && data.details is map && data.details.keys().size() == 0;
+    }
+
+    // Prise d'un médicament ou d'une vitamine de la maman (§11, §12) : un nom, jamais de dose calculée
+    function isValidIntakeDetails(details) {
+      return details is map
+        && details.keys().hasOnly(['reminderId', 'name']) && details.keys().hasAll(['reminderId', 'name'])
+        && (details.reminderId == null || details.reminderId is string)
+        && details.name is string && details.name.size() > 0 && details.name.size() <= 80;
+    }
+
+    // Événement bébé (cahier §27). Chaque nouveau type ajoute sa propre validation ici.
+    function isValidEvent(data) {
+      return data.keys().hasOnly(['type', 'occurredAt', 'startAt', 'endAt', 'status', 'details',
+                                  'comment', 'createdAt', 'updatedAt'])
+        && data.keys().hasAll(['type', 'occurredAt', 'details', 'comment', 'createdAt', 'updatedAt'])
+        && data.occurredAt is timestamp
+        && data.comment is string && data.comment.size() <= 500
+        && ((data.type == 'bottle' && isPointEvent(data) && isValidBottleDetails(data.details))
+            || (data.type == 'diaper' && isPointEvent(data) && isValidDiaperDetails(data.details))
+            || (data.type == 'milkPumping' && isPointEvent(data) && isValidPumpingDetails(data.details))
+            || (data.type == 'breastfeeding' && data.keys().hasAll(['startAt', 'endAt', 'status'])
+                && isValidBreastfeeding(data))
+            || (data.type == 'sleep' && data.keys().hasAll(['startAt', 'endAt', 'status'])
+                && isValidSleep(data)));
+    }
+
+    // Contenant de lait (cahier §8.2) : le statut doit correspondre à la quantité restante
+    function isValidContainer(data) {
+      return data.keys().hasOnly(['pumpedAt', 'initialAmountMl', 'remainingAmountMl', 'storageType',
+                                  'storedAt', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasAll(['pumpedAt', 'initialAmountMl', 'remainingAmountMl', 'storageType',
+                               'storedAt', 'status', 'createdAt', 'updatedAt'])
+        && data.pumpedAt is timestamp && data.storedAt is timestamp
+        && data.initialAmountMl is number && data.initialAmountMl > 0 && data.initialAmountMl <= 2000
+        && data.remainingAmountMl is number && data.remainingAmountMl >= 0
+        && data.remainingAmountMl <= data.initialAmountMl
+        && data.storageType in ['fridge', 'freezer', 'other']
+        && ((data.status == 'available' && data.remainingAmountMl == data.initialAmountMl)
+            || (data.status == 'used' && data.remainingAmountMl > 0
+                && data.remainingAmountMl < data.initialAmountMl)
+            || (data.status in ['depleted', 'discarded'] && data.remainingAmountMl == 0));
+    }
+
+    // Événement personnel de la maman (§12, §27) : eau, repas, médicament, vitamine
+    function isValidPersonalEvent(data) {
+      return data.keys().hasOnly(['type', 'occurredAt', 'details', 'comment', 'createdAt', 'updatedAt'])
+        && data.keys().hasAll(['type', 'occurredAt', 'details', 'comment', 'createdAt', 'updatedAt'])
+        && data.occurredAt is timestamp
+        && data.comment is string && data.comment.size() <= 500
+        && data.details is map
+        && ((data.type == 'hydration'
+              && data.details.keys().hasOnly(['amountMl']) && data.details.keys().hasAll(['amountMl'])
+              && isOptionalAmount(data.details.amountMl, 3000))
+            || (data.type == 'meal'
+              && data.details.keys().hasOnly(['mealType', 'composition'])
+              && data.details.keys().hasAll(['mealType', 'composition'])
+              && data.details.mealType in ['breakfast', 'lunch', 'dinner', 'snack', 'other']
+              && data.details.composition is string && data.details.composition.size() <= 500)
+            || (data.type in ['motherMedication', 'supplement'] && isValidIntakeDetails(data.details)));
+    }
+
+    // Rendez-vous (§13) : une seule collection, `concerne` = 'mother' ou un bébé existant
+    function isValidAppointment(userId, data) {
+      return data.keys().hasOnly(['concerne', 'title', 'scheduledAt', 'location', 'contact', 'comment',
+                                  'status', 'createdAt', 'updatedAt'])
+        && data.keys().hasAll(['concerne', 'title', 'scheduledAt', 'location', 'contact', 'comment',
+                               'status', 'createdAt', 'updatedAt'])
+        && data.concerne is string
+        && (data.concerne == 'mother' || babyExists(userId, data.concerne))
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 100
+        && data.scheduledAt is timestamp
+        && (data.location == null || (data.location is string && data.location.size() <= 200))
+        && (data.contact == null || (data.contact is string && data.contact.size() <= 200))
+        && data.comment is string && data.comment.size() <= 500
+        && data.status in ['planned', 'done', 'cancelled'];
+    }
+
+    // Rappel ou traitement (§11, §14, §27) : avant P2, seulement enregistré, jamais envoyé
+    function isValidReminder(userId, data) {
+      return data.keys().hasOnly(['serviceId', 'babyId', 'title', 'description', 'scheduleType',
+                                  'scheduledTimes', 'daysOfWeek', 'intervalMinutes', 'maxRepeats',
+                                  'repeatEveryMinutes', 'startDate', 'endDate', 'timezone', 'enabled',
+                                  'createdAt', 'updatedAt'])
+        && data.keys().hasAll(['serviceId', 'babyId', 'title', 'description', 'scheduleType',
+                               'scheduledTimes', 'daysOfWeek', 'intervalMinutes', 'maxRepeats',
+                               'repeatEveryMinutes', 'startDate', 'endDate', 'timezone', 'enabled',
+                               'createdAt', 'updatedAt'])
+        && data.serviceId in ['medication', 'supplement', 'hydration', 'meal', 'bottle',
+                              'breastfeeding', 'diaper', 'sleep', 'custom']
+        && (data.babyId == null || (data.babyId is string && babyExists(userId, data.babyId)))
+        // Médicaments et vitamines : uniquement pour la maman (décision d'équipe du 21/10)
+        && (!(data.serviceId in ['medication', 'supplement']) || data.babyId == null)
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 80
+        && data.description is string && data.description.size() <= 500
+        && data.scheduledTimes is list && data.scheduledTimes.size() <= 12
+        && data.daysOfWeek is list && data.daysOfWeek.size() >= 1 && data.daysOfWeek.size() <= 7
+        && ((data.scheduleType == 'fixedTimes' && data.scheduledTimes.size() >= 1 && data.intervalMinutes == null)
+            || (data.scheduleType == 'interval' && data.intervalMinutes is number
+                && data.intervalMinutes >= 15 && data.intervalMinutes <= 1440))
+        && data.maxRepeats is number && data.maxRepeats >= 0 && data.maxRepeats <= 10
+        && (data.repeatEveryMinutes == null || data.repeatEveryMinutes is number)
+        && (data.startDate == null || data.startDate is timestamp)
+        && (data.endDate == null || data.endDate is timestamp)
+        && (data.startDate == null || data.endDate == null || data.endDate >= data.startDate)
+        && data.timezone is string
+        && data.enabled is bool;
+    }
+
+    // Profil maman : ce qu'elle garde pour elle (taille, pense-bête). Aucun calcul (pas d'IMC).
+    function isValidMotherInfo(data) {
+      return data.keys().hasOnly(['heightCm', 'notes', 'createdAt', 'updatedAt'])
+        && data.keys().hasAll(['heightCm', 'notes', 'createdAt', 'updatedAt'])
+        && (data.heightCm == null || (data.heightCm is number && data.heightCm >= 100 && data.heightCm <= 230))
+        && data.notes is string && data.notes.size() <= 2000;
+    }
+
+    // Poids de la maman : la valeur saisie, en kg
+    function isValidMotherWeight(data) {
+      return data.keys().hasOnly(['weightKg', 'measuredAt', 'comment', 'createdAt', 'updatedAt'])
+        && data.keys().hasAll(['weightKg', 'measuredAt', 'comment', 'createdAt', 'updatedAt'])
+        && data.weightKg is number && data.weightKg >= 20 && data.weightKg <= 300
+        && data.measuredAt is timestamp
+        && data.comment is string && data.comment.size() <= 500;
+    }
+
+    // Contacts utiles de la maman (sage-femme, pédiatre…)
+    function isValidMotherContact(data) {
+      return data.keys().hasOnly(['role', 'name', 'phone', 'createdAt', 'updatedAt'])
+        && data.keys().hasAll(['role', 'name', 'phone', 'createdAt', 'updatedAt'])
+        && data.role in ['midwife', 'gynecologist', 'pediatrician', 'doctor', 'pharmacy', 'family', 'other']
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 100
+        && data.phone is string && data.phone.size() <= 30 && data.phone.matches('^[0-9+(). -]*$');
+    }
+
+    // Mesure de croissance (§15) : poids en kg, taille et périmètre crânien en cm, ou mesure
+    // personnalisée nommée. Seulement les valeurs saisies : aucun percentile ni interprétation.
+    function isValidGrowthRecord(data) {
+      return data.keys().hasOnly(['type', 'label', 'value', 'unit', 'measuredAt', 'comment', 'createdAt', 'updatedAt'])
+        && data.keys().hasAll(['type', 'label', 'value', 'unit', 'measuredAt', 'comment', 'createdAt', 'updatedAt'])
+        && data.value is number && data.value > 0
+        && data.measuredAt is timestamp
+        && data.comment is string && data.comment.size() <= 500
+        && ((data.type == 'weight' && data.label == null && data.unit == 'kg' && data.value <= 50)
+            || (data.type in ['height', 'headCircumference'] && data.label == null && data.unit == 'cm'
+                && data.value <= 200)
+            || (data.type == 'custom'
+                && data.label is string && data.label.size() > 0 && data.label.size() <= 50
+                && data.unit is string && data.unit.size() > 0 && data.unit.size() <= 10
+                && data.value <= 100000));
+    }
+
+    // Opération de stock (cahier §8.3) : ajout, utilisation ou écarté
+    function isValidOperation(data) {
+      return data.keys().hasOnly(['type', 'amountMl', 'linkedEventId', 'occurredAt'])
+        && data.keys().hasAll(['type', 'amountMl', 'linkedEventId', 'occurredAt'])
+        && data.type in ['add', 'use', 'discard']
+        && data.amountMl is number && data.amountMl >= 0 && data.amountMl <= 2000
+        && (data.linkedEventId == null || data.linkedEventId is string)
+        && data.occurredAt is timestamp;
+    }
+
     // Profil de la maman : seule la propriétaire y a accès (cahier §28)
     match /users/{userId} {
       allow read, delete: if isOwner(userId);
       allow create: if isOwner(userId)
         && isValidUser(request.resource.data)
         && request.resource.data.welcomeEmailSent == false
-        && request.resource.data.createdAt == request.time
-        && request.resource.data.updatedAt == request.time;
+        && hasCreateTimestamps();
       allow update: if isOwner(userId)
         && isValidUser(request.resource.data)
-        && request.resource.data.createdAt == resource.data.createdAt
-        && request.resource.data.updatedAt == request.time;
+        && hasUpdateTimestamps();
 
-      // Les sous-collections (babies, appointments...) seront ouvertes module par module.
+      match /personalEvents/{eventId} {
+        allow read, delete: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidPersonalEvent(request.resource.data) && hasCreateTimestamps();
+        allow update: if isOwner(userId)
+          && isValidPersonalEvent(request.resource.data)
+          && request.resource.data.type == resource.data.type
+          && hasUpdateTimestamps();
+      }
+
+      match /appointments/{appointmentId} {
+        allow read, delete: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidAppointment(userId, request.resource.data) && hasCreateTimestamps();
+        allow update: if isOwner(userId) && isValidAppointment(userId, request.resource.data) && hasUpdateTimestamps();
+      }
+
+      match /reminders/{reminderId} {
+        allow read, delete: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidReminder(userId, request.resource.data) && hasCreateTimestamps();
+        allow update: if isOwner(userId) && isValidReminder(userId, request.resource.data) && hasUpdateTimestamps();
+      }
+
+      // Profil maman : un seul document « profile »
+      match /motherInfo/{docId} {
+        allow read, delete: if isOwner(userId);
+        allow create: if isOwner(userId) && docId == 'profile'
+          && isValidMotherInfo(request.resource.data) && hasCreateTimestamps();
+        allow update: if isOwner(userId) && docId == 'profile'
+          && isValidMotherInfo(request.resource.data) && hasUpdateTimestamps();
+      }
+
+      match /motherWeights/{weightId} {
+        allow read, delete: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidMotherWeight(request.resource.data) && hasCreateTimestamps();
+        allow update: if isOwner(userId) && isValidMotherWeight(request.resource.data) && hasUpdateTimestamps();
+      }
+
+      match /motherContacts/{contactId} {
+        allow read, delete: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidMotherContact(request.resource.data) && hasCreateTimestamps();
+        allow update: if isOwner(userId) && isValidMotherContact(request.resource.data) && hasUpdateTimestamps();
+      }
+
+      match /babies/{babyId} {
+        allow read, delete: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && isValidBaby(request.resource.data)
+          && request.resource.data.archivedAt == null
+          && hasCreateTimestamps();
+        allow update: if isOwner(userId)
+          && isValidBaby(request.resource.data)
+          && hasUpdateTimestamps();
+
+        match /events/{eventId} {
+          allow read, delete: if isOwner(userId);
+          allow create: if isOwner(userId)
+            && babyExists(userId, babyId)
+            && isValidEvent(request.resource.data)
+            && hasCreateTimestamps();
+          allow update: if isOwner(userId)
+            && isValidEvent(request.resource.data)
+            && request.resource.data.type == resource.data.type
+            && hasUpdateTimestamps();
+        }
+
+        // Croissance (§15) : une mesure garde son type ; on la corrige ou on la supprime
+        match /growthRecords/{recordId} {
+          allow read, delete: if isOwner(userId);
+          allow create: if isOwner(userId)
+            && babyExists(userId, babyId)
+            && isValidGrowthRecord(request.resource.data)
+            && hasCreateTimestamps();
+          allow update: if isOwner(userId)
+            && isValidGrowthRecord(request.resource.data)
+            && request.resource.data.type == resource.data.type
+            && hasUpdateTimestamps();
+        }
+
+        // Tirage en cours (§5) : supprimé quand le tirage est enregistré ou annulé ; le début ne change pas
+        match /pumpingSessions/{sessionId} {
+          allow read, delete: if isOwner(userId);
+          allow create: if isOwner(userId)
+            && babyExists(userId, babyId)
+            && isValidPumpingSession(request.resource.data)
+            && hasCreateTimestamps();
+          allow update: if isOwner(userId)
+            && isValidPumpingSession(request.resource.data)
+            && request.resource.data.startAt == resource.data.startAt
+            && hasUpdateTimestamps();
+        }
+
+        // Stock de lait (cahier §8) : la quantité restante ne peut que baisser,
+        // un contenant épuisé ou écarté n'est plus modifiable.
+        match /milkContainers/{containerId} {
+          allow read, delete: if isOwner(userId);
+          allow create: if isOwner(userId)
+            && babyExists(userId, babyId)
+            && isValidContainer(request.resource.data)
+            && request.resource.data.status == 'available'
+            && hasCreateTimestamps();
+          allow update: if isOwner(userId)
+            && isValidContainer(request.resource.data)
+            && resource.data.status in ['available', 'used']
+            && request.resource.data.initialAmountMl == resource.data.initialAmountMl
+            && request.resource.data.pumpedAt == resource.data.pumpedAt
+            && request.resource.data.remainingAmountMl <= resource.data.remainingAmountMl
+            && hasUpdateTimestamps();
+
+          // Historique du contenant : on ajoute des opérations, on ne les modifie jamais
+          match /operations/{operationId} {
+            allow read, delete: if isOwner(userId);
+            allow create: if isOwner(userId)
+              && existsAfter(/databases/$(database)/documents/users/$(userId)/babies/$(babyId)/milkContainers/$(containerId))
+              && isValidOperation(request.resource.data);
+          }
+        }
+      }
     }
 
     // Tout le reste est refusé par défaut.

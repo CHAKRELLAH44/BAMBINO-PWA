@@ -8,21 +8,30 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "emulators": "firebase emulators:start --only auth,firestore"
+    "emulators": "firebase emulators:start --only auth,firestore",
+    "test": "vitest run src",
+    "test:rules": "firebase emulators:exec --only firestore \"vitest run tests/rules\""
   },
   "dependencies": {
     "@emailjs/browser": "^5.0.3",
     "@hookform/resolvers": "^5.9.2",
+    "@tabler/icons-react": "^3.49.0",
+    "date-fns": "^4.4.0",
     "firebase": "^13.0.0",
     "i18next": "^26.5.3",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.9",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-hook-form": "^7.90.0",
     "react-i18next": "^17.1.0",
+    "react-is": "^19.3.1",
     "react-router": "^8.5.0",
+    "recharts": "^3.10.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^6.0.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^24.19.2",
     "@types/react": "^19.3.0",
@@ -31,6 +40,8 @@
     "oxlint": "^1.88.0",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.3",
-    "vite": "^8.3.4"
+    "vite": "^8.3.4",
+    "vite-plugin-pwa": "^2.0.0",
+    "vitest": "^5.0.5"
   }
 }

@@ -2,6 +2,13 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import i18n from './i18n'
+import { listenForInstallPrompt } from './services/pwa/installPrompt'
+import { startServiceWorker } from './services/pwa/serviceWorker'
+import { watchSystemTheme } from './utils/theme'
+
+watchSystemTheme()
+listenForInstallPrompt()
+startServiceWorker()
 
 const root = createRoot(document.getElementById('root')!)
 

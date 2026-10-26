@@ -1,16 +1,21 @@
 import {
   createUserWithEmailAndPassword,
+  deleteUser,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
 } from 'firebase/auth'
 import { sendWelcomeEmail } from '../../services/email/welcomeEmail'
 import { auth } from '../../services/firebase/config'
+import { deleteAllUserData } from '../../services/repositories/accountRepository'
 import {
   createUserProfile,
   getUserProfile,
   markWelcomeEmailSent,
 } from '../../services/repositories/userRepository'
+import { clearLocalUserData, markAccountDeleted } from '../../utils/localData'
 import type { ForgotPasswordValues, LoginValues, SignUpValues } from './schemas'
 
 export interface SignUpResult {
@@ -54,4 +59,24 @@ export async function resetPassword(values: ForgotPasswordValues) {
 
 export async function logOut() {
   await signOut(auth)
+}
+
+/**
+ * Suppression du compte par la maman (§3.4). Le mot de passe est redemandé : il confirme l'identité
+ * et répond à l'exigence de Firebase (« connexion récente ») avant toute suppression.
+ * Ordre : données Firestore, puis document users/{userId} (deleteAllUserData), puis compte Authentication.
+ */
+export async function deleteAccount(password: string) {
+  const user = auth.currentUser
+  if (!user?.email) throw new Error('Aucune utilisatrice connectée')
+  await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, password))
+  await deleteAllUserData(user.uid)
+  clearLocalUserData(user.uid)
+  markAccountDeleted(true)
+  try {
+    await deleteUser(user)
+  } catch (error) {
+    markAccountDeleted(false)
+    throw error
+  }
 }

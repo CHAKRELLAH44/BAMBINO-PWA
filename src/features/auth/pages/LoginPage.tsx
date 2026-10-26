@@ -1,18 +1,25 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router'
 import { AuthCard } from '../../../components/AuthCard'
 import { FormField } from '../../../components/FormField'
+import { InstallHint } from '../../../components/InstallHint'
 import { authErrorKey } from '../authErrors'
 import { logIn } from '../authService'
 import { loginSchema, type LoginValues } from '../schemas'
+import { markAccountDeleted, wasAccountDeleted } from '../../../utils/localData'
 
 export function LoginPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const [submitError, setSubmitError] = useState<string | null>(null)
+  // Retour ici juste après la suppression du compte (§3.4) : on le confirme une fois
+  const [accountDeleted] = useState(wasAccountDeleted)
+  useEffect(() => {
+    if (accountDeleted) markAccountDeleted(false)
+  }, [accountDeleted])
   const {
     register,
     handleSubmit,
@@ -31,6 +38,12 @@ export function LoginPage() {
 
   return (
     <AuthCard title={t('auth.login.title')}>
+      {accountDeleted && (
+        <p role="status" className="mb-4 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">
+          {t('account.deleted')}
+        </p>
+      )}
+      <InstallHint className="mb-4" />
       <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex flex-col gap-4">
         <FormField
           id="email"

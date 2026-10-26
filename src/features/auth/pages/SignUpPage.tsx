@@ -1,10 +1,15 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router'
 import { AuthCard } from '../../../components/AuthCard'
+import { InstallHint } from '../../../components/InstallHint'
 import { FormField } from '../../../components/FormField'
+import { SegmentedControl } from '../../../components/SegmentedControl'
+import { labelClass } from '../../../components/styles'
+import { changeAppLanguage } from '../../../i18n'
+import { useLanguageOptions } from '../../../i18n/useLanguageOptions'
 import { authErrorKey } from '../authErrors'
 import { signUp } from '../authService'
 import { signUpSchema, type SignUpValues } from '../schemas'
@@ -13,20 +18,24 @@ export function SignUpPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const languages = useLanguageOptions()
   const {
     register,
     handleSubmit,
+    control,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<SignUpValues>({
     resolver: zodResolver(signUpSchema),
-    defaultValues: { preferredLanguage: 'fr' },
+    defaultValues: { preferredLanguage: languages.current },
   })
+  const preferredLanguage = useWatch({ control, name: 'preferredLanguage' })
 
   const onSubmit = async (values: SignUpValues) => {
     setSubmitError(null)
     try {
       const result = await signUp(values)
-      // Le tableau de bord lit ce résultat pour afficher « vérifie ta boîte mail »
+      // Le guide de bienvenue lit ce résultat pour dire si l'e-mail de confirmation est parti
       await navigate('/', { replace: true, state: result })
     } catch (error) {
       setSubmitError(authErrorKey(error))
@@ -35,6 +44,7 @@ export function SignUpPage() {
 
   return (
     <AuthCard title={t('auth.signUp.title')}>
+      <InstallHint className="mb-4" />
       <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex flex-col gap-4">
         <FormField
           id="displayName"
@@ -60,17 +70,16 @@ export function SignUpPage() {
           {...register('password')}
         />
         <div className="flex flex-col gap-1">
-          <label htmlFor="preferredLanguage" className="text-sm font-medium text-slate-700">
-            {t('auth.fields.preferredLanguage')}
-          </label>
-          <select
-            id="preferredLanguage"
-            className="rounded-lg border border-slate-300 px-3 py-2"
-            {...register('preferredLanguage')}
-          >
-            <option value="fr">Français</option>
-            <option value="ar">العربية</option>
-          </select>
+          <span className={labelClass}>{t('auth.fields.preferredLanguage')}</span>
+          <SegmentedControl
+            label={t('auth.fields.preferredLanguage')}
+            options={languages.options}
+            value={preferredLanguage}
+            onChange={(language) => {
+              setValue('preferredLanguage', language)
+              changeAppLanguage(language)
+            }}
+          />
         </div>
 
         {submitError && (

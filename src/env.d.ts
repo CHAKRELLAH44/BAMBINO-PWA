@@ -6,5 +6,7 @@ interface ImportMetaEnv {
   readonly VITE_EMAILJS_SERVICE_ID: string
   readonly VITE_EMAILJS_TEMPLATE_ID: string
   readonly VITE_EMAILJS_PUBLIC_KEY: string
+  /** Facultatif : modèle EmailJS des suggestions envoyées à l'équipe */
+  readonly VITE_EMAILJS_FEEDBACK_TEMPLATE_ID?: string
   readonly VITE_USE_EMULATORS: string
 }
